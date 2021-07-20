@@ -58,7 +58,7 @@ list(APPEND flight_tasks_all
 	ManualPositionSmooth
 	ManualPositionSmoothVel
 	AutoLineSmoothVel
-	AutoFollowMe
+	AutoFollowTarget
 	Offboard
 	Failsafe
 	Descend

@@ -67,6 +67,7 @@ px4_add_board(
 		ekf2
 		esc_battery
 		events
+		follow_target_estimator
 		fw_att_control
 		fw_pos_control_l1
 		land_detector

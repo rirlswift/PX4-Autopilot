@@ -64,6 +64,8 @@ set(msg_files
 	estimator_sensor_bias.msg
 	estimator_status.msg
 	follow_target.msg
+	follow_target_status.msg
+	follow_target_estimator.msg
 	geofence_result.msg
 	gps_dump.msg
 	gps_inject_data.msg

@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2018 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -32,24 +32,12 @@
 ############################################################################
 
 px4_add_module(
-	MODULE modules__navigator
-	MAIN navigator
+	MODULE modules__follow_target_estimator
+	MAIN follow_target_estimator
+	COMPILE_FLAGS
 	SRCS
-		navigator_main.cpp
-		navigator_mode.cpp
-		mission_block.cpp
-		mission.cpp
-		loiter.cpp
-		rtl.cpp
-		takeoff.cpp
-		land.cpp
-		precland.cpp
-		mission_feasibility_checker.cpp
-		geofence.cpp
-		enginefailure.cpp
-		gpsfailure.cpp
+		follow_target_estimator_main.cpp
+		TargetEstimator.cpp
 	DEPENDS
-		git_ecl
-		ecl_geo
-		landing_slope
 	)
+

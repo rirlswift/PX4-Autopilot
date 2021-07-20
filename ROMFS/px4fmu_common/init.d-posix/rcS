@@ -236,7 +236,7 @@ rc_update start
 sensors start
 commander start
 navigator start
-
+follow_target_estimator start
 
 if ! param compare -s MNT_MODE_IN -1
 then
