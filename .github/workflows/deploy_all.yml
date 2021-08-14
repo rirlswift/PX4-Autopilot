@@ -3,7 +3,7 @@ name: Deploy metadata for all targets
 on:
   push:
     branches:
-    - 'master'
+    - 'feature/DOICISB-112-code-analysis'
     - 'release/*'
     - 'pr-metadata-test'
 

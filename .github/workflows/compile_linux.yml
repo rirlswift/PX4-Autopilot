@@ -3,7 +3,7 @@ name: Linux Targets
 on:
   push:
     branches:
-    - 'master'
+    - 'feature/DOICISB-112-code-analysis'
   pull_request:
     branches:
     - '*'
