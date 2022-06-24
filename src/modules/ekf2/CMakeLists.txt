@@ -42,6 +42,8 @@ px4_add_module(
 		#-DDEBUG_BUILD
 	INCLUDES
 		EKF
+	PRIORITY
+		"SCHED_PRIORITY_MAX - 18" # max priority below high priority WQ threads
 	STACK_MAX
 		3600
 	SRCS
@@ -64,6 +66,7 @@ px4_add_module(
 		EKF/mag_control.cpp
 		EKF/mag_fusion.cpp
 		EKF/optflow_fusion.cpp
+		EKF/range_finder_consistency_check.cpp
 		EKF/sensor_range_finder.cpp
 		EKF/sideslip_fusion.cpp
 		EKF/terrain_estimator.cpp

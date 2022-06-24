@@ -77,20 +77,16 @@ Navigator::Navigator() :
 	_vtol_takeoff(this),
 	_land(this),
 	_precland(this),
-	_rtl(this),
-	_engineFailure(this),
-	_follow_target(this)
+	_rtl(this)
 {
 	/* Create a list of our possible navigation types */
 	_navigation_mode_array[0] = &_mission;
 	_navigation_mode_array[1] = &_loiter;
 	_navigation_mode_array[2] = &_rtl;
-	_navigation_mode_array[3] = &_engineFailure;
-	_navigation_mode_array[4] = &_takeoff;
-	_navigation_mode_array[5] = &_land;
-	_navigation_mode_array[6] = &_precland;
-	_navigation_mode_array[7] = &_vtol_takeoff;
-	_navigation_mode_array[8] = &_follow_target;
+	_navigation_mode_array[3] = &_takeoff;
+	_navigation_mode_array[4] = &_land;
+	_navigation_mode_array[5] = &_precland;
+	_navigation_mode_array[6] = &_vtol_takeoff;
 
 	_handle_back_trans_dec_mss = param_find("VT_B_DEC_MSS");
 	_handle_reverse_delay = param_find("VT_B_REV_DEL");
@@ -236,7 +232,10 @@ void Navigator::run()
 				// TODO: move DO_GO_AROUND handling to navigator
 				publish_vehicle_command_ack(cmd, vehicle_command_s::VEHICLE_CMD_RESULT_ACCEPTED);
 
-			} else if (cmd.command == vehicle_command_s::VEHICLE_CMD_DO_REPOSITION) {
+			} else if (cmd.command == vehicle_command_s::VEHICLE_CMD_DO_REPOSITION
+				   && _vstatus.arming_state == vehicle_status_s::ARMING_STATE_ARMED) {
+				// only update the reposition setpoint if armed, as it otherwise won't get executed until the vehicle switches to loiter,
+				// which can lead to dangerous and unexpected behaviors (see loiter.cpp, there is an if(armed) in there too)
 
 				bool reposition_valid = true;
 
@@ -405,7 +404,10 @@ void Navigator::run()
 				rep->current.loiter_direction = 1;
 				rep->current.type = position_setpoint_s::SETPOINT_TYPE_TAKEOFF;
 
-				if (home_position_valid()) {
+				if (home_global_position_valid()) {
+					// Only set yaw if we know the true heading
+					// We assume that the heading is valid when the global position is valid because true heading
+					// is required to fuse NE (e.g.: GNSS) data. // TODO: we should be more explicit here
 					rep->current.yaw = cmd.param4;
 
 					rep->previous.valid = true;
@@ -424,6 +426,7 @@ void Navigator::run()
 					// If one of them is non-finite set the current global position as target
 					rep->current.lat = get_global_position()->lat;
 					rep->current.lon = get_global_position()->lon;
+
 				}
 
 				rep->current.alt = cmd.param7;
@@ -488,19 +491,6 @@ void Navigator::run()
 					}
 				}
 
-				if (get_vstatus()->nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER) {
-
-					// publish new reposition setpoint with updated speed/throtte when DO_CHANGE_SPEED
-					// was received in AUTO_LOITER mode
-
-					position_setpoint_triplet_s *rep = get_reposition_triplet();
-
-					// set repo setpoint to current, and only change speed and throttle fields
-					*rep = *(get_position_setpoint_triplet());
-					rep->current.cruising_speed = get_cruising_speed();
-					rep->current.cruising_throttle = get_cruising_throttle();
-				}
-
 				// TODO: handle responses for supported DO_CHANGE_SPEED options?
 				publish_vehicle_command_ack(cmd, vehicle_command_s::VEHICLE_CMD_RESULT_ACCEPTED);
 
@@ -546,9 +536,10 @@ void Navigator::run()
 
 				publish_vehicle_command_ack(cmd, vehicle_command_s::VEHICLE_CMD_RESULT_ACCEPTED);
 
-			} else if (cmd.command == vehicle_command_s::VEHICLE_CMD_DO_VTOL_TRANSITION) {
-				// reset cruise speed and throttle to default when transitioning
-				set_cruising_speed();
+			} else if (cmd.command == vehicle_command_s::VEHICLE_CMD_DO_VTOL_TRANSITION
+				   && get_vstatus()->nav_state != vehicle_status_s::NAVIGATION_STATE_AUTO_VTOL_TAKEOFF) {
+				// reset cruise speed and throttle to default when transitioning (VTOL Takeoff handles it separately)
+				reset_cruising_speed();
 				set_cruising_throttle();
 
 				// need to update current setpooint with reset cruise speed and throttle
@@ -706,16 +697,6 @@ void Navigator::run()
 			_precland.set_mode(PrecLandMode::Required);
 			break;
 
-		case vehicle_status_s::NAVIGATION_STATE_AUTO_LANDENGFAIL:
-			_pos_sp_triplet_published_invalid_once = false;
-			navigation_mode_new = &_engineFailure;
-			break;
-
-		case vehicle_status_s::NAVIGATION_STATE_AUTO_FOLLOW_TARGET:
-			_pos_sp_triplet_published_invalid_once = false;
-			navigation_mode_new = &_follow_target;
-			break;
-
 		case vehicle_status_s::NAVIGATION_STATE_MANUAL:
 		case vehicle_status_s::NAVIGATION_STATE_ACRO:
 		case vehicle_status_s::NAVIGATION_STATE_ALTCTL:
@@ -819,6 +800,7 @@ void Navigator::geofence_breach_check(bool &have_geofence_position_data)
 		float test_point_bearing;
 		float test_point_distance;
 		float vertical_test_point_distance;
+		char geofence_violation_warning[50];
 
 		if (_vstatus.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING) {
 			test_point_bearing = atan2f(_local_pos.vy, _local_pos.vx);
@@ -847,11 +829,19 @@ void Navigator::geofence_breach_check(bool &have_geofence_position_data)
 		_gf_breach_avoidance.setMaxHorDistHome(_geofence.getMaxHorDistanceHome());
 		_gf_breach_avoidance.setMaxVerDistHome(_geofence.getMaxVerDistanceHome());
 
-		if (home_position_valid()) {
+		if (home_global_position_valid()) {
 			_gf_breach_avoidance.setHomePosition(_home_pos.lat, _home_pos.lon, _home_pos.alt);
 		}
 
-		fence_violation_test_point = _gf_breach_avoidance.getFenceViolationTestPoint();
+		if (_geofence.getPredict()) {
+			fence_violation_test_point = _gf_breach_avoidance.getFenceViolationTestPoint();
+			snprintf(geofence_violation_warning, sizeof(geofence_violation_warning), "Approaching on geofence");
+
+		} else {
+			fence_violation_test_point = matrix::Vector2d(_global_pos.lat, _global_pos.lon);
+			vertical_test_point_distance = 0;
+			snprintf(geofence_violation_warning, sizeof(geofence_violation_warning), "Geofence exceeded");
+		}
 
 		gf_violation_type.flags.dist_to_home_exceeded = !_geofence.isCloserThanMaxDistToHome(fence_violation_test_point(0),
 				fence_violation_test_point(1),
@@ -877,9 +867,9 @@ void Navigator::geofence_breach_check(bool &have_geofence_position_data)
 
 			/* Issue a warning about the geofence violation once and only if we are armed */
 			if (!_geofence_violation_warning_sent && _vstatus.arming_state == vehicle_status_s::ARMING_STATE_ARMED) {
-				mavlink_log_critical(&_mavlink_log_pub, "Approaching on Geofence\t");
-				events::send(events::ID("navigator_approach_geofence"), {events::Log::Warning, events::LogInternal::Info},
-					     "Approaching on Geofence");
+				mavlink_log_critical(&_mavlink_log_pub, "%s", geofence_violation_warning);
+				events::send(events::ID("navigator_geofence_violation"), {events::Log::Warning, events::LogInternal::Info},
+					     geofence_violation_warning);
 
 				// we have predicted a geofence violation and if the action is to loiter then
 				// demand a reposition to a location which is inside the geofence
@@ -1555,8 +1545,7 @@ bool Navigator::geofence_allows_position(const vehicle_global_position_s &pos)
 	    (_geofence.getGeofenceAction() != geofence_result_s::GF_ACTION_WARN)) {
 
 		if (PX4_ISFINITE(pos.lat) && PX4_ISFINITE(pos.lon)) {
-			return _geofence.check(pos, _gps_pos, _home_pos,
-					       home_position_valid());
+			return _geofence.check(pos, _gps_pos);
 		}
 	}
 

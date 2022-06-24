@@ -95,9 +95,9 @@ void Ekf::controlHaglRngFusion()
 	}
 
 	if (_range_sensor.isDataHealthy()) {
-		const bool continuing_conditions_passing = _control_status.flags.in_air;
+		const bool continuing_conditions_passing = _control_status.flags.in_air && _rng_consistency_check.isKinematicallyConsistent();
 		//const bool continuing_conditions_passing = _control_status.flags.in_air && !_control_status.flags.rng_hgt; // TODO: should not be fused when using range height
-		const bool starting_conditions_passing = continuing_conditions_passing && _range_sensor.isRegularlySendingData();
+		const bool starting_conditions_passing = continuing_conditions_passing && _range_sensor.isRegularlySendingData() && (_rng_consistency_check.getTestRatio() < 1.f);
 
 		_time_last_healthy_rng_data = _time_last_imu;
 
@@ -194,6 +194,10 @@ void Ekf::resetHaglRng()
 void Ekf::stopHaglRngFusion()
 {
 	_hagl_sensor_status.flags.range_finder = false;
+	_hagl_innov = 0.f;
+	_hagl_innov_var = 0.f;
+	_hagl_test_ratio = 0.f;
+	_innov_check_fail_status.flags.reject_hagl = false;
 }
 
 void Ekf::fuseHaglRng()
@@ -290,6 +294,10 @@ void Ekf::startHaglFlowFusion()
 void Ekf::stopHaglFlowFusion()
 {
 	_hagl_sensor_status.flags.flow = false;
+	_hagl_innov = 0.f;
+	_hagl_innov_var = 0.f;
+	_hagl_test_ratio = 0.f;
+	_innov_check_fail_status.flags.reject_hagl = false;
 }
 
 void Ekf::resetHaglFlow()

@@ -40,15 +40,7 @@
 
 using namespace matrix;
 
-FlightTaskAuto::FlightTaskAuto() :
-	_obstacle_avoidance(this),
-	_sticks(this),
-	_stick_acceleration_xy(this)
-{
-
-}
-
-bool FlightTaskAuto::activate(const vehicle_local_position_setpoint_s &last_setpoint)
+bool FlightTaskAuto::activate(const trajectory_setpoint_s &last_setpoint)
 {
 	bool ret = FlightTask::activate(last_setpoint);
 
@@ -61,8 +53,8 @@ bool FlightTaskAuto::activate(const vehicle_local_position_setpoint_s &last_setp
 	_velocity_setpoint = _velocity;
 	_position_setpoint = _position;
 
-	Vector3f vel_prev{last_setpoint.vx, last_setpoint.vy, last_setpoint.vz};
-	Vector3f pos_prev{last_setpoint.x, last_setpoint.y, last_setpoint.z};
+	Vector3f vel_prev{last_setpoint.velocity};
+	Vector3f pos_prev{last_setpoint.position};
 	Vector3f accel_prev{last_setpoint.acceleration};
 
 	for (int i = 0; i < 3; i++) {
@@ -81,6 +73,7 @@ bool FlightTaskAuto::activate(const vehicle_local_position_setpoint_s &last_setp
 	_yaw_sp_prev = PX4_ISFINITE(last_setpoint.yaw) ? last_setpoint.yaw : _yaw;
 	_updateTrajConstraints();
 	_is_emergency_braking_active = false;
+	_time_last_cruise_speed_override = 0;
 
 	return ret;
 }
@@ -222,6 +215,12 @@ bool FlightTaskAuto::update()
 	return ret;
 }
 
+void FlightTaskAuto::overrideCruiseSpeed(const float cruise_speed_m_s)
+{
+	_mc_cruise_speed = cruise_speed_m_s;
+	_time_last_cruise_speed_override = hrt_absolute_time();
+}
+
 void FlightTaskAuto::_prepareLandSetpoints()
 {
 	_velocity_setpoint.setNaN(); // Don't take over any smoothed velocity setpoint
@@ -245,14 +244,12 @@ void FlightTaskAuto::_prepareLandSetpoints()
 	}
 
 	// User input assisted landing
-	if (_param_mpc_land_rc_help.get() && _sticks.checkAndSetStickInputs()) {
+	if (_param_mpc_land_rc_help.get() && _sticks.checkAndUpdateStickInputs()) {
 		// Stick full up -1 -> stop, stick full down 1 -> double the speed
 		vertical_speed *= (1 + _sticks.getPositionExpo()(2));
 
 		// Only set a yawrate setpoint if weather vane is not active or the yaw stick is out of its dead-zone
-		const bool weather_vane_active = (_ext_yaw_handler != nullptr) && _ext_yaw_handler->is_active();
-
-		if (!weather_vane_active || fabsf(_sticks.getPositionExpo()(3)) > FLT_EPSILON) {
+		if (!_weathervane.isActive() || fabsf(_sticks.getPositionExpo()(3)) > FLT_EPSILON) {
 			_stick_yaw.generateYawSetpoint(_yawspeed_setpoint, _land_heading,
 						       _sticks.getPositionExpo()(3) * math::radians(_param_mpc_man_y_max.get()), _yaw, _is_yaw_good_for_control, _deltatime);
 		}
@@ -344,8 +341,14 @@ bool FlightTaskAuto::_evaluateTriplets()
 
 	_type = (WaypointType)_sub_triplet_setpoint.get().current.type;
 
-	// Always update cruise speed since that can change without waypoint changes.
-	_mc_cruise_speed = _sub_triplet_setpoint.get().current.cruising_speed;
+	// Prioritize cruise speed from the triplet when it's valid and more recent than the previously commanded cruise speed
+	const float cruise_speed_from_triplet = _sub_triplet_setpoint.get().current.cruising_speed;
+
+	if (PX4_ISFINITE(cruise_speed_from_triplet)
+	    && (cruise_speed_from_triplet > 0.f)
+	    && (_sub_triplet_setpoint.get().current.timestamp > _time_last_cruise_speed_override)) {
+		_mc_cruise_speed = cruise_speed_from_triplet;
+	}
 
 	if (!PX4_ISFINITE(_mc_cruise_speed) || (_mc_cruise_speed < 0.0f)) {
 		// If no speed is planned use the default cruise speed as limit
@@ -442,11 +445,8 @@ bool FlightTaskAuto::_evaluateTriplets()
 		_next_was_valid = _sub_triplet_setpoint.get().next.valid;
 	}
 
-	if (_ext_yaw_handler != nullptr) {
-		// activation/deactivation of weather vane is based on parameter WV_EN and setting of navigator (allow_weather_vane)
-		(_param_wv_en.get() && !_sub_triplet_setpoint.get().current.disable_weather_vane) ?	_ext_yaw_handler->activate() :
-		_ext_yaw_handler->deactivate();
-	}
+	// activation/deactivation of weather vane is based on parameter WV_EN and setting of navigator (allow_weather_vane)
+	_weathervane.setNavigatorForceDisabled(_sub_triplet_setpoint.get().current.disable_weather_vane);
 
 	// Calculate the current vehicle state and check if it has updated.
 	State previous_state = _current_state;
@@ -463,14 +463,16 @@ bool FlightTaskAuto::_evaluateTriplets()
 				_triplet_next_wp,
 				_sub_triplet_setpoint.get().next.yaw,
 				_sub_triplet_setpoint.get().next.yawspeed_valid ? _sub_triplet_setpoint.get().next.yawspeed : (float)NAN,
-				_ext_yaw_handler != nullptr && _ext_yaw_handler->is_active(), _sub_triplet_setpoint.get().current.type);
+				_weathervane.isActive(), _sub_triplet_setpoint.get().current.type);
 		_obstacle_avoidance.checkAvoidanceProgress(
 			_position, _triplet_prev_wp, _target_acceptance_radius, Vector2f(_closest_pt));
 	}
 
 	// set heading
-	if (_ext_yaw_handler != nullptr && _ext_yaw_handler->is_active()) {
-		_yaw_setpoint = _yaw;
+	_weathervane.update();
+
+	if (_weathervane.isActive()) {
+		_yaw_setpoint = NAN;
 		// use the yawrate setpoint from WV only if not moving lateral (velocity setpoint below half of _param_mpc_xy_cruise)
 		// otherwise, keep heading constant (as output from WV is not according to wind in this case)
 		bool vehicle_is_moving_lateral = _velocity_setpoint.xy().longerThan(_param_mpc_xy_cruise.get() / 2.0f);
@@ -479,7 +481,7 @@ bool FlightTaskAuto::_evaluateTriplets()
 			_yawspeed_setpoint = 0.0f;
 
 		} else {
-			_yawspeed_setpoint = _ext_yaw_handler->get_weathervane_yawrate();
+			_yawspeed_setpoint = _weathervane.getWeathervaneYawrate();
 		}
 
 

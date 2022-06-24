@@ -129,49 +129,6 @@ PARAM_DEFINE_INT32(COM_HLDL_LOSS_T, 120);
 PARAM_DEFINE_INT32(COM_HLDL_REG_T, 0);
 
 /**
- * Engine Failure Throttle Threshold
- *
- * Engine failure triggers only above this throttle value
- *
- * @group Commander
- * @unit norm
- * @min 0.0
- * @max 1.0
- * @decimal 2
- * @increment 0.01
- */
-PARAM_DEFINE_FLOAT(COM_EF_THROT, 0.5f);
-
-/**
- * Engine Failure Current/Throttle Threshold
- *
- * Engine failure triggers only below this current value
- *
- * @group Commander
- * @min 0.0
- * @max 50.0
- * @unit A/%
- * @decimal 2
- * @increment 1
- */
-PARAM_DEFINE_FLOAT(COM_EF_C2T, 5.0f);
-
-/**
- * Engine Failure Time Threshold
- *
- * Engine failure triggers only if the throttle threshold and the
- * current to throttle threshold are violated for this time
- *
- * @group Commander
- * @unit s
- * @min 0.0
- * @max 60.0
- * @decimal 1
- * @increment 1
- */
-PARAM_DEFINE_FLOAT(COM_EF_TIME, 10.0f);
-
-/**
  * RC loss time threshold
  *
  * After this amount of seconds without RC connection it's considered lost and not used anymore
@@ -212,34 +169,6 @@ PARAM_DEFINE_FLOAT(COM_RCL_ACT_T, 15.0f);
  * @boolean
  */
 PARAM_DEFINE_INT32(COM_HOME_EN, 1);
-
-/**
- * Home set horizontal threshold
- *
- * The home position will be set if the estimated positioning accuracy is below the threshold.
- *
- * @group Commander
- * @unit m
- * @min 2
- * @max 15
- * @decimal 2
- * @increment 0.5
- */
-PARAM_DEFINE_FLOAT(COM_HOME_H_T, 5.0f);
-
-/**
- * Home set vertical threshold
- *
- * The home position will be set if the estimated positioning accuracy is below the threshold.
- *
- * @group Commander
- * @unit m
- * @min 5
- * @max 25
- * @decimal 2
- * @increment 0.5
- */
-PARAM_DEFINE_FLOAT(COM_HOME_V_T, 10.0f);
 
 /**
  * Allows setting the home position after takeoff
@@ -367,7 +296,7 @@ PARAM_DEFINE_INT32(COM_LOW_BAT_ACT, 0);
  * @max 25.0
  * @decimal 3
  */
-PARAM_DEFINE_FLOAT(COM_BAT_ACT_T, 10.0f);
+PARAM_DEFINE_FLOAT(COM_BAT_ACT_T, 5.f);
 
 /**
  * Imbalanced propeller failsafe mode
@@ -415,6 +344,17 @@ PARAM_DEFINE_FLOAT(COM_OF_LOSS_T, 1.0f);
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_OBL_ACT, 0);
+
+/**
+ * Set command after a quadchute
+ *
+ * @value -1 No action: stay in current flight mode
+ * @value  0 Return mode
+ * @value  1 Land mode
+ * @value  2 Hold mode
+ * @group Commander
+ */
+PARAM_DEFINE_INT32(COM_QC_ACT, 0);
 
 /**
  * Set offboard loss failsafe mode when RC is available
@@ -465,6 +405,7 @@ PARAM_DEFINE_FLOAT(COM_OBC_LOSS_T, 5.0f);
  * @value 7 Offboard
  * @value 8 Stabilized
  * @value 12 Follow Me
+ * @value 13 Precision Land
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_FLTMODE1, -1);
@@ -488,6 +429,7 @@ PARAM_DEFINE_INT32(COM_FLTMODE1, -1);
  * @value 7 Offboard
  * @value 8 Stabilized
  * @value 12 Follow Me
+ * @value 13 Precision Land
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_FLTMODE2, -1);
@@ -511,6 +453,7 @@ PARAM_DEFINE_INT32(COM_FLTMODE2, -1);
  * @value 7 Offboard
  * @value 8 Stabilized
  * @value 12 Follow Me
+ * @value 13 Precision Land
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_FLTMODE3, -1);
@@ -534,6 +477,7 @@ PARAM_DEFINE_INT32(COM_FLTMODE3, -1);
  * @value 7 Offboard
  * @value 8 Stabilized
  * @value 12 Follow Me
+ * @value 13 Precision Land
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_FLTMODE4, -1);
@@ -557,6 +501,7 @@ PARAM_DEFINE_INT32(COM_FLTMODE4, -1);
  * @value 7 Offboard
  * @value 8 Stabilized
  * @value 12 Follow Me
+ * @value 13 Precision Land
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_FLTMODE5, -1);
@@ -580,6 +525,7 @@ PARAM_DEFINE_INT32(COM_FLTMODE5, -1);
  * @value 7 Offboard
  * @value 8 Stabilized
  * @value 12 Follow Me
+ * @value 13 Precision Land
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_FLTMODE6, -1);
@@ -797,33 +743,6 @@ PARAM_DEFINE_FLOAT(COM_ARM_AUTH_TO, 1);
 PARAM_DEFINE_INT32(COM_POS_FS_DELAY, 1);
 
 /**
- * Loss of position probation delay at takeoff.
- *
- * The probation delay is the number of seconds that the EKF innovation checks need to pass for the position to be declared good after it has been declared bad.
- * The probation delay will be reset to this parameter value when takeoff is detected.
- * After takeoff, if position checks are passing, the probation delay will reduce by one second for every lapsed second of valid position down to a minimum of 1 second.
- * If position checks are failing, the probation delay will increase by COM_POS_FS_GAIN seconds for every lapsed second up to a maximum of 100 seconds.
- * The default value has been optimised for rotary wing applications. For fixed wing applications, a value of 1 should be used.
- *
- * @unit s
- * @group Commander
- * @min 1
- * @max 100
- */
-PARAM_DEFINE_INT32(COM_POS_FS_PROB, 30);
-
-/**
- * Loss of position probation gain factor.
- *
- * This sets the rate that the loss of position probation time grows when position checks are failing.
- * The default value has been optimised for rotary wing applications. For fixed wing applications a value of 0 should be used.
- *
- * @reboot_required true
- * @group Commander
- */
-PARAM_DEFINE_INT32(COM_POS_FS_GAIN, 10);
-
-/**
  * Horizontal position error threshold.
  *
  * This is the horizontal position error (EPH) threshold that will trigger a failsafe. The default is appropriate for a multicopter. Can be increased for a fixed-wing.
@@ -932,6 +851,23 @@ PARAM_DEFINE_INT32(NAV_RCL_ACT, 2);
 PARAM_DEFINE_INT32(COM_RCL_EXCEPT, 0);
 
 /**
+ * Set the actuator failure failsafe mode
+ *
+ * Note: actuator failure needs to be enabled and configured via FD_ACT_*
+ * parameters.
+ *
+ * @min 0
+ * @max 3
+ * @value 0 Disabled
+ * @value 1 Hold mode
+ * @value 2 Land mode
+ * @value 3 Return mode
+ * @value 4 Terminate
+ * @group Commander
+ */
+PARAM_DEFINE_INT32(COM_ACT_FAIL_ACT, 0);
+
+/**
  * Flag to enable obstacle avoidance.
  *
  * @boolean
@@ -987,6 +923,16 @@ PARAM_DEFINE_INT32(COM_ARM_CHK_ESCS, 0);
  * @group Commander
  */
 PARAM_DEFINE_INT32(COM_PREARM_MODE, 0);
+
+/**
+ * Enable force safety
+ *
+ * Force safety when the vehicle disarms
+ *
+ * @boolean
+ * @group Commander
+ */
+PARAM_DEFINE_INT32(COM_FORCE_SAFETY, 0);
 
 /**
  * Enable Motor Testing
@@ -1078,6 +1024,22 @@ PARAM_DEFINE_INT32(COM_ARM_ARSP_EN, 1);
 PARAM_DEFINE_INT32(COM_ARM_SDCARD, 1);
 
 /**
+ * Enforced delay between arming and further navigation
+ *
+ * The minimal time from arming the motors until moving the vehicle is possible is COM_SPOOLUP_TIME seconds.
+ * Goal:
+ * - Motors and propellers spool up to idle speed before getting commanded to spin faster
+ * - Timeout for ESCs and smart batteries to successfulyy do failure checks
+ *   e.g. for stuck rotors before the vehicle is off the ground
+ *
+ * @group Commander
+ * @min 0
+ * @max 5
+ * @unit s
+ */
+PARAM_DEFINE_FLOAT(COM_SPOOLUP_TIME, 1.0f);
+
+/**
  * Wind speed warning threshold
  *
  * A warning is triggered if the currently estimated wind speed is above this value.
@@ -1093,3 +1055,38 @@ PARAM_DEFINE_INT32(COM_ARM_SDCARD, 1);
  * @unit m/s
  */
 PARAM_DEFINE_FLOAT(COM_WIND_WARN, -1.f);
+
+/**
+ * Maximum allowed flight time
+ *
+ * The vehicle aborts the current operation and returns to launch when
+ * the time since takeoff is above this value. It is not possible to resume the
+ * mission or switch to any mode other than RTL or Land.
+ *
+ * Set a nagative value to disable.
+ *
+ *
+ * @unit s
+ * @min -1
+ * @max 10000
+ * @value 0 Disable
+ * @group Commander
+ */
+PARAM_DEFINE_INT32(COM_FLT_TIME_MAX, -1);
+
+/**
+ * Wind speed RLT threshold
+ *
+ * Wind speed threshold above which an automatic return to launch is triggered
+ * and enforced as long as the threshold is exceeded.
+ *
+ * A negative value disables the feature.
+ *
+ * @min -1
+ * @max 30
+ * @decimal 1
+ * @increment 0.1
+ * @group Commander
+ * @unit m/s
+ */
+PARAM_DEFINE_FLOAT(COM_WIND_MAX, -1.f);

@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include "Integrator.hpp"
+#include <Integrator.hpp>
 
 #include <lib/mathlib/math/Limits.hpp>
 #include <lib/mathlib/math/WelfordMean.hpp>
@@ -84,8 +84,9 @@ private:
 	bool UpdateGyro();
 
 	void UpdateIntegratorConfiguration();
-	void UpdateAccelVibrationMetrics(const matrix::Vector3f &acceleration);
-	void UpdateGyroVibrationMetrics(const matrix::Vector3f &angular_velocity);
+
+	inline void UpdateAccelVibrationMetrics(const matrix::Vector3f &acceleration);
+	inline void UpdateGyroVibrationMetrics(const matrix::Vector3f &angular_velocity);
 
 	void SensorCalibrationUpdate();
 	void SensorCalibrationSaveAccel();
@@ -107,8 +108,8 @@ private:
 	calibration::Accelerometer _accel_calibration{};
 	calibration::Gyroscope _gyro_calibration{};
 
-	Integrator       _accel_integrator{};
-	IntegratorConing _gyro_integrator{};
+	sensors::Integrator       _accel_integrator{};
+	sensors::IntegratorConing _gyro_integrator{};
 
 	uint32_t _imu_integration_interval_us{5000};
 
@@ -144,10 +145,18 @@ private:
 
 	vehicle_imu_status_s _status{};
 
-	uint8_t _delta_velocity_clipping{0};
+	float _coning_norm_accum{0};
+	float _coning_norm_accum_total_time_s{0};
 
-	hrt_abstime _last_clipping_notify_time{0};
-	uint64_t _last_clipping_notify_total_count{0};
+	uint8_t     _delta_angle_clipping{0};
+	uint8_t     _delta_velocity_clipping{0};
+
+	hrt_abstime _last_accel_clipping_notify_time{0};
+	hrt_abstime _last_gyro_clipping_notify_time{0};
+
+	uint64_t    _last_accel_clipping_notify_total_count{0};
+	uint64_t    _last_gyro_clipping_notify_total_count{0};
+
 	orb_advert_t _mavlink_log_pub{nullptr};
 
 	uint32_t _backup_schedule_timeout_us{20000};
@@ -182,7 +191,6 @@ private:
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::IMU_INTEG_RATE>) _param_imu_integ_rate,
-		(ParamInt<px4::params::IMU_GYRO_RATEMAX>) _param_imu_gyro_ratemax,
 		(ParamBool<px4::params::SENS_IMU_AUTOCAL>) _param_sens_imu_autocal
 	)
 };

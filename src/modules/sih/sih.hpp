@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*   Copyright (c) 2019-2020 PX4 Development Team. All rights reserved.
+*   Copyright (c) 2019-2022 PX4 Development Team. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions
@@ -58,39 +58,48 @@
 #include <px4_platform_common/module.h>
 #include <px4_platform_common/module_params.h>
 #include <px4_platform_common/posix.h>
-#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 
 #include <matrix/matrix/math.hpp>   // matrix, vectors, dcm, quaterions
 #include <conversion/rotation.h>    // math::radians,
 #include <lib/geo/geo.h>        // to get the physical constants
 #include <drivers/drv_hrt.h>        // to get the real time
 #include <lib/drivers/accelerometer/PX4Accelerometer.hpp>
-#include <lib/drivers/barometer/PX4Barometer.hpp>
 #include <lib/drivers/gyroscope/PX4Gyroscope.hpp>
 #include <lib/drivers/magnetometer/PX4Magnetometer.hpp>
-#include <lib/perf/perf_counter.h>
+#include <perf/perf_counter.h>
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/SubscriptionInterval.hpp>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/actuator_outputs.h>
 #include <uORB/topics/sensor_gps.h>
+#include <uORB/topics/sensor_baro.h>
 #include <uORB/topics/vehicle_angular_velocity.h>   // to publish groundtruth
 #include <uORB/topics/vehicle_attitude.h>           // to publish groundtruth
 #include <uORB/topics/vehicle_global_position.h>    // to publish groundtruth
 #include <uORB/topics/distance_sensor.h>
 #include <uORB/topics/airspeed.h>
 
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+#include <sys/time.h>
+#endif
+
 using namespace time_literals;
 
-class Sih : public ModuleBase<Sih>, public ModuleParams, public px4::ScheduledWorkItem
+extern "C" __EXPORT int sih_main(int argc, char *argv[]);
+
+class Sih : public ModuleBase<Sih>, public ModuleParams
 {
 public:
 	Sih();
-	~Sih() override;
+
+	virtual ~Sih();
 
 	/** @see ModuleBase */
 	static int task_spawn(int argc, char *argv[]);
+
+	/** @see ModuleBase */
+	static Sih *instantiate(int argc, char *argv[]);
 
 	/** @see ModuleBase */
 	static int custom_command(int argc, char *argv[]);
@@ -101,23 +110,26 @@ public:
 	/** @see ModuleBase */
 	static int print_usage(const char *reason = nullptr);
 
+	/** @see ModuleBase::run() */
+	void run() override;
+
 	static float generate_wgn();    // generate white Gaussian noise sample
 
 	// generate white Gaussian noise sample as a 3D vector with specified std
 	static matrix::Vector3f noiseGauss3f(float stdx, float stdy, float stdz);
 
-	bool init();
+	// timer called periodically to post the semaphore
+	static void timer_callback(void *sem);
 
 private:
-	void Run() override;
-
 	void parameters_updated();
 
 	// simulated sensor instances
 	PX4Accelerometer _px4_accel{1310988}; // 1310988: DRV_IMU_DEVTYPE_SIM, BUS: 1, ADDR: 1, TYPE: SIMULATION
 	PX4Gyroscope     _px4_gyro{1310988};  // 1310988: DRV_IMU_DEVTYPE_SIM, BUS: 1, ADDR: 1, TYPE: SIMULATION
 	PX4Magnetometer  _px4_mag{197388};    //  197388: DRV_MAG_DEVTYPE_MAGSIM, BUS: 3, ADDR: 1, TYPE: SIMULATION
-	PX4Barometer     _px4_baro{6620172};  // 6620172: DRV_BARO_DEVTYPE_BAROSIM, BUS: 1, ADDR: 4, TYPE: SIMULATION
+
+	uORB::PublicationMulti<sensor_baro_s> _sensor_baro_pub{ORB_ID(sensor_baro)};
 
 	// to publish the gps position
 	sensor_gps_s			_sensor_gps{};
@@ -170,11 +182,23 @@ private:
 	void publish_sih();
 	void generate_fw_aerodynamics();
 	void generate_ts_aerodynamics();
+	void sensor_step();
+
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
+	void lockstep_loop();
+	uint64_t _current_simulation_time_us{0};
+	float _achieved_speedup{0.f};
+#endif
+
+	void realtime_loop();
+	px4_sem_t       _data_semaphore;
+	hrt_call 	_timer_call;
 
 	perf_counter_t  _loop_perf{perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")};
 	perf_counter_t  _loop_interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME": cycle interval")};
 
 	hrt_abstime _last_run{0};
+	hrt_abstime _last_actuator_output_time{0};
 	hrt_abstime _baro_time{0};
 	hrt_abstime _gps_time{0};
 	hrt_abstime _airspeed_time{0};
@@ -274,7 +298,7 @@ private:
 	// parameters defined in sih_params.c
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::IMU_GYRO_RATEMAX>) _imu_gyro_ratemax,
-
+		(ParamInt<px4::params::IMU_INTEG_RATE>) _imu_integration_rate,
 		(ParamFloat<px4::params::SIH_MASS>) _sih_mass,
 		(ParamFloat<px4::params::SIH_IXX>) _sih_ixx,
 		(ParamFloat<px4::params::SIH_IYY>) _sih_iyy,

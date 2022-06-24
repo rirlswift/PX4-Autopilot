@@ -320,15 +320,17 @@ PARAM_DEFINE_FLOAT(EKF2_MAG_B_NOISE, 1.0e-4f);
 PARAM_DEFINE_FLOAT(EKF2_MAG_E_NOISE, 1.0e-3f);
 
 /**
- * Process noise for wind velocity prediction.
+ * Process noise spectral density for wind velocity prediction.
+ *
+ * When unaided, the wind estimate uncertainty (1-sigma, in m/s) increases by this amount every second.
  *
  * @group EKF2
  * @min 0.0
  * @max 1.0
- * @unit m/s^2
+ * @unit m/s^2/sqrt(Hz)
  * @decimal 3
  */
-PARAM_DEFINE_FLOAT(EKF2_WIND_NOISE, 1.0e-1f);
+PARAM_DEFINE_FLOAT(EKF2_WIND_NSD, 1.0e-2f);
 
 /**
  * Measurement noise for gps horizontal velocity.
@@ -1113,6 +1115,23 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_A_IGATE, 1.0f);
  * @max 5
 */
 PARAM_DEFINE_FLOAT(EKF2_RNG_QLTY_T, 1.0f);
+
+/**
+ * Gate size used for range finder kinematic consistency check
+ *
+ * To be used, the time derivative of the distance sensor measurements projected on the vertical axis
+ * needs to be statistically consistent with the estimated vertical velocity of the drone.
+ *
+ * Decrease this value to make the filter more robust against range finder faulty data (stuck, reflections, ...).
+ *
+ * Note: tune the range finder noise parameters (EKF2_RNG_NOISE and EKF2_RNG_SFE) before tuning this gate.
+ *
+ * @group EKF2
+ * @unit SD
+ * @min 0.1
+ * @max 5.0
+*/
+PARAM_DEFINE_FLOAT(EKF2_RNG_K_GATE, 1.0f);
 
 /**
  * Gate size for vision velocity estimate fusion

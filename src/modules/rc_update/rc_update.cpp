@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2016-2021 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2016-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -115,7 +115,7 @@ RCUpdate::~RCUpdate()
 bool RCUpdate::init()
 {
 	if (!_input_rc_sub.registerCallback()) {
-		PX4_ERR("input_rc callback registration failed!");
+		PX4_ERR("callback registration failed");
 		return false;
 	}
 
@@ -320,7 +320,7 @@ RCUpdate::map_flight_modes_buttons()
 	}
 
 	// If the functionality is disabled we don't need to map channels
-	const int flightmode_buttons = _param_rc_map_flightmode_buttons.get();
+	const int flightmode_buttons = _param_rc_map_fltm_btn.get();
 
 	if (flightmode_buttons == 0) {
 		return;
@@ -513,7 +513,7 @@ void RCUpdate::Run()
 		if (input_source_stable && channel_count_stable && !_rc_signal_lost_hysteresis.get_state()) {
 
 			if ((input_rc.timestamp_last_signal > _last_timestamp_signal)
-			    && (input_rc.timestamp_last_signal - _last_timestamp_signal < 1_s)) {
+			    && (input_rc.timestamp_last_signal < _last_timestamp_signal + VALID_DATA_MIN_INTERVAL_US)) {
 
 				perf_count(_valid_data_interval_perf);
 
@@ -542,6 +542,12 @@ void RCUpdate::Run()
 			}
 
 			_last_timestamp_signal = input_rc.timestamp_last_signal;
+
+		} else {
+			// RC input unstable or lost, clear any previous manual_switches
+			if (_manual_switches_last_publish.timestamp_sample != 0) {
+				_manual_switches_last_publish = {};
+			}
 		}
 
 		memcpy(_rc_values_previous, input_rc.values, sizeof(input_rc.values[0]) * channel_count_limited);
@@ -599,7 +605,7 @@ void RCUpdate::UpdateManualSwitches(const hrt_abstime &timestamp_sample)
 			switches.mode_slot = num_slots;
 		}
 
-	} else if (_param_rc_map_flightmode_buttons.get() > 0) {
+	} else if (_param_rc_map_fltm_btn.get() > 0) {
 		switches.mode_slot = manual_control_switches_s::MODE_SLOT_NONE;
 		bool is_consistent_button_press = false;
 
@@ -623,7 +629,7 @@ void RCUpdate::UpdateManualSwitches(const hrt_abstime &timestamp_sample)
 			}
 		}
 
-		_button_pressed_hysteresis.set_state_and_update(is_consistent_button_press, hrt_absolute_time());
+		_button_pressed_hysteresis.set_state_and_update(is_consistent_button_press, timestamp_sample);
 
 		if (_button_pressed_hysteresis.get_state()) {
 			switches.mode_slot = _potential_button_press_slot;
@@ -643,8 +649,10 @@ void RCUpdate::UpdateManualSwitches(const hrt_abstime &timestamp_sample)
 	switches.video_switch = get_rc_sw2pos_position(rc_channels_s::FUNCTION_AUX_4, 0.5f);
 #endif
 
-	// last 2 switch updates identical (simple protection from bad RC data)
-	if (switches == _manual_switches_previous) {
+	// last 2 switch updates identical within 1 second (simple protection from bad RC data)
+	if ((switches == _manual_switches_previous)
+	    && (switches.timestamp_sample < _manual_switches_previous.timestamp_sample + VALID_DATA_MIN_INTERVAL_US)) {
+
 		const bool switches_changed = (switches != _manual_switches_last_publish);
 
 		// publish immediately on change or at ~1 Hz
